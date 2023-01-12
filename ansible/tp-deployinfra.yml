@@ -1,0 +1,200 @@
+---
+- name: "Récupération des facts du groupe1 depuis localhost"
+  hosts: front
+  any_errors_fatal: yes
+ 
+  tasks:
+  - setup:
+    delegate_to: "{{item}}"
+    delegate_facts: True
+    with_items: "{{groups.backend1}}"
+
+- name: Install and configure a kitten web page
+  hosts: backend1
+  vars:
+    Mon_user_eductive02: "Mon user eductive16 : le meilleur !"
+  tasks:
+    - name: Mise à jour des dépôts de paquets
+      apt:
+        update_cache: yes
+    - name: Ensure package nginx is installed
+      apt:
+        name: nginx
+        state: latest
+    - name: Ensure service nginx is running
+      service:
+        name: nginx
+        state: started
+    - name: Configure Kitten Page
+      template:
+        src: templates/index.html
+        dest: /var/www/html/index.html 
+ 
+- name: Install and configure docker
+  hosts: backend2
+  tasks:
+    - name: Install required system packages
+      apt:
+        pkg:
+          - apt-transport-https
+          - ca-certificates
+          - lsb-release
+          - gnupg
+        state: latest
+        update_cache: true
+    - name: Add Docker GPG apt Key
+      apt_key:
+        url: https://download.docker.com/linux/debian/gpg
+        state: present
+    - name: Add Docker Repository
+      apt_repository:
+        repo: deb https://download.docker.com/linux/debian bullseye stable
+        state: present
+    - name: Installation docker-compose
+      apt:
+        name:
+          - docker
+          - docker-compose
+          - docker-compose-plugin
+        state: present 
+    - name: run docker
+      service:
+        name: docker
+        state: started
+        enabled: yes
+    - name: ifconfig.io
+      copy:
+        src: templates/ifconfig.io
+        dest: /home/debian/
+    - name: Run container
+      become: True
+      shell:
+        cmd: "docker-compose up -d "
+        chdir: /home/debian/ifconfig.io/
+
+- name: "Récupération des facts du groupe2 depuis localhost"
+  hosts: front
+  any_errors_fatal: yes
+ 
+  tasks:
+  - setup:
+    delegate_to: "{{item}}"
+    delegate_facts: True
+    with_items: "{{groups.backend2}}"
+
+- name: Install and configure NFS Server
+  hosts: front
+  tasks:
+    - name: Install NFS Server packages
+      apt:
+        name:
+          - nfs-kernel-server
+          - nfs-common
+        state: present
+    - name: Start NFS Server service
+      service:
+        name: nfs-kernel-server
+        state: started
+    - name: Create wordpress-data directory
+      file:
+        path: /home/wordpress-data
+        state: directory
+    - name: Update exports file
+      lineinfile:
+        path: /etc/exports
+        line: "/home/wordpress-data/ 192.168.16.0/255.255.255.0(rw,no_root_squash,anonuid=1000,anongid=1000,sync)"
+        state: present
+    - name: Restart NFS Server
+      service:
+        name: nfs-kernel-server
+        state: restarted
+
+- name: "Récupération des facts du groupe1 depuis localhost"
+  hosts: front
+  any_errors_fatal: yes
+ 
+  tasks:
+  - setup:
+    delegate_to: "{{item}}"
+    delegate_facts: True
+    with_items: "{{groups.backend3}}"
+
+- name: Mount NFS share on backend hosts
+  hosts: backend3
+
+  vars:
+    mdpdb: "{{ hostvars[inventory_hostname]['mdpdb'] }}"
+    domainedb : "{{ hostvars[inventory_hostname]['domainedb'] }}"
+    portdb : "{{ hostvars[inventory_hostname]['portdb'] }}"
+
+  tasks:
+    - name: Install NFS client
+      apt:
+        name: nfs-common
+        state: present
+    - name: Create mount point
+      file:
+        path: /home/wordpress-data
+        state: directory
+    - name: Mount NFS share
+      mount:
+        path: /home/wordpress-data
+        src: "{{ hostvars[inventory_hostname]['IpPrive'] }}:/home/wordpress-data"
+        fstype: nfs
+        state: mounted
+    - name: Install required system packages
+      apt:
+        pkg:
+          - apt-transport-https
+          - ca-certificates
+          - lsb-release
+          - gnupg
+        state: latest
+        update_cache: true
+    - name: Add Docker GPG apt Key
+      apt_key:
+        url: https://download.docker.com/linux/debian/gpg
+        state: present
+    - name: Add Docker Repository
+      apt_repository:
+        repo: deb https://download.docker.com/linux/debian bullseye stable
+        state: present
+    - name: Installation docker-compose
+      apt:
+        name:
+          - docker
+          - docker-compose
+          - docker-compose-plugin
+        state: present
+    - name: run docker
+      service:
+        name: docker
+        state: started
+        enabled: yes
+    - name: Copy docker-compose
+      template:
+        src: templates/wordpress/docker-compose.yml
+        dest: /home/wordpress-data/
+      
+    - name: Run container
+      become: True
+      shell:
+        cmd: "docker-compose up -d "
+        chdir: /home/wordpress-data/
+
+- name: Install and configure haproxy
+  hosts: front
+  become: true
+  tasks:
+    - name: Install Haproxy
+      apt:
+        name: haproxy
+        state: present     
+    - name: Copy Haproxy Configuration file
+      template:
+        src: templates/haproxy.cfg
+        dest: /etc/haproxy/haproxy.cfg
+    - name: Ensure service haproxy is running
+      service:
+        name: haproxy
+        state: restarted 
